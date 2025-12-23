@@ -215,8 +215,7 @@ def print_image(image, printer_info, rotate=0, dither=False):
     if status.status == "completed":
         status_container.success("Print job completed successfully!")
         if PRIVACY_MODE:
-            # Clear the image from memory or perform any privacy-related actions
-            image.close()
+            status_container.info("Privacy mode is enabled; sticker not saved locally.")
         else:
             filename = safe_filename("Stikka-")
             file_path = os.path.join("labels", filename)
@@ -301,3 +300,12 @@ def process_print_job(image, printer_info, temp_file_path, rotate=0, dither=Fals
         if debug:
             logger.debug(error_msg)
         return False, error_msg
+
+    finally:
+        # Clean up temporary file
+        try:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+                logger.debug(f"Temporary file {temp_file_path} deleted.")
+        except Exception as e:
+            logger.warning(f"Failed to delete temporary file {temp_file_path}: {str(e)}")
