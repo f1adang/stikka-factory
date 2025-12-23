@@ -35,3 +35,9 @@ enabled = [
     "History",
     "FAQ",
 ]
+
+[fallback]
+models = [
+    "QL-570"
+]
+label = 62
