@@ -34,6 +34,7 @@ LOGGING_CONFIG = CONFIG.get("logging", {})
 FALLBACK_CONFIG = CONFIG.get("fallback", {})
 
 PRIVACY_MODE = APP_CONFIG.get("privacy_mode", True)
+DEBUG_MODE = APP_CONFIG.get("debug_mode", False)
 APP_TITLE = APP_CONFIG.get("title", "STICKER FACTORY")
 HISTORY_LIMIT = UI_CONFIG.get("history_limit", 15)
 
