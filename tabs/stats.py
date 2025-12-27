@@ -1,9 +1,11 @@
 """Statistics tab content - show print statistics over time."""
 
+import logging
 import streamlit as st
-import pandas as pd
 from datetime import datetime, timedelta
 from stats_utils import get_stats_by_date, get_total_stats, get_stats_summary
+
+logger = logging.getLogger("sticker_factory.tabs.stats")
 
 
 def render():
@@ -40,6 +42,23 @@ def render():
         st.info("No print statistics available yet. Start printing to see statistics!")
         return
     
+    # Try to import pandas, but handle gracefully if it fails
+    try:
+        import pandas as pd
+        pandas_available = True
+    except Exception as e:
+        st.error(f"Pandas is not available: {e}")
+        st.info("Showing basic statistics without charts.")
+        pandas_available = False
+    
+    if not pandas_available:
+        # Fallback: show basic stats without pandas
+        st.subheader("Daily Print Counts")
+        for date_str in sorted(date_stats.keys(), reverse=True):
+            total_for_date = sum(date_stats[date_str].values())
+            st.write(f"**{date_str}**: {total_for_date} prints")
+        return
+    
     # Convert to DataFrame for easier manipulation
     df_data = []
     for date_str, printers in date_stats.items():
@@ -50,7 +69,17 @@ def render():
                 "count": count
             })
     
-    df = pd.DataFrame(df_data)
+    try:
+        df = pd.DataFrame(df_data)
+    except Exception as e:
+        st.error(f"Error creating DataFrame: {e}")
+        logger.error(f"Error creating DataFrame: {e}", exc_info=True)
+        # Fallback: show basic stats
+        st.subheader("Daily Print Counts")
+        for date_str in sorted(date_stats.keys(), reverse=True):
+            total_for_date = sum(date_stats[date_str].values())
+            st.write(f"**{date_str}**: {total_for_date} prints")
+        return
     
     # Date range selector
     st.subheader("Time Range")
@@ -74,40 +103,49 @@ def render():
         st.info(f"No prints in the selected time range ({selected_range}).")
         return
     
-    # Group by date and printer, sum counts
-    df_grouped = df.groupby(["date", "printer"])["count"].sum().reset_index()
-    
-    # Pivot for line chart
-    df_pivot = df_grouped.pivot(index="date", columns="printer", values="count").fillna(0)
-    
-    # Sort by date
-    df_pivot = df_pivot.sort_index()
-    
-    # Line chart
-    st.subheader("Prints Over Time")
-    st.line_chart(df_pivot, use_container_width=True)
-    
-    # Printer totals
-    st.subheader("Total Prints by Printer")
-    totals = get_total_stats()
-    
-    if totals:
-        # Create a DataFrame for the bar chart
-        totals_df = pd.DataFrame([
-            {"Printer": name, "Total Prints": count}
-            for name, count in sorted(totals.items(), key=lambda x: x[1], reverse=True)
-        ])
+    try:
+        # Group by date and printer, sum counts
+        df_grouped = df.groupby(["date", "printer"])["count"].sum().reset_index()
         
-        st.bar_chart(totals_df.set_index("Printer"), use_container_width=True)
+        # Pivot for line chart
+        df_pivot = df_grouped.pivot(index="date", columns="printer", values="count").fillna(0)
         
-        # Show table with details
-        with st.expander("View Detailed Statistics"):
-            st.dataframe(totals_df, use_container_width=True, hide_index=True)
-    
-    # Daily breakdown table
-    st.subheader("Daily Breakdown")
-    daily_totals = df.groupby("date")["count"].sum().reset_index()
-    daily_totals.columns = ["Date", "Total Prints"]
-    daily_totals = daily_totals.sort_values("Date", ascending=False)
-    st.dataframe(daily_totals, use_container_width=True, hide_index=True)
+        # Sort by date
+        df_pivot = df_pivot.sort_index()
+        
+        # Line chart
+        st.subheader("Prints Over Time")
+        st.line_chart(df_pivot, use_container_width=True)
+        
+        # Printer totals
+        st.subheader("Total Prints by Printer")
+        totals = get_total_stats()
+        
+        if totals:
+            # Create a DataFrame for the bar chart
+            totals_df = pd.DataFrame([
+                {"Printer": name, "Total Prints": count}
+                for name, count in sorted(totals.items(), key=lambda x: x[1], reverse=True)
+            ])
+            
+            st.bar_chart(totals_df.set_index("Printer"), use_container_width=True)
+            
+            # Show table with details
+            with st.expander("View Detailed Statistics"):
+                st.dataframe(totals_df, use_container_width=True, hide_index=True)
+        
+        # Daily breakdown table
+        st.subheader("Daily Breakdown")
+        daily_totals = df.groupby("date")["count"].sum().reset_index()
+        daily_totals.columns = ["Date", "Total Prints"]
+        daily_totals = daily_totals.sort_values("Date", ascending=False)
+        st.dataframe(daily_totals, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.error(f"Error displaying charts: {e}")
+        logger.error(f"Error displaying charts: {e}", exc_info=True)
+        # Fallback: show basic stats
+        st.subheader("Daily Print Counts")
+        for date_str in sorted(date_stats.keys(), reverse=True):
+            total_for_date = sum(date_stats[date_str].values())
+            st.write(f"**{date_str}**: {total_for_date} prints")
 

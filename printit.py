@@ -372,8 +372,12 @@ else:
                         preper_image=preper_image,
                     )
                 elif tab_name == "Stats":
-                    import tabs.stats as stats_module
-                    stats_module.render()
+                    try:
+                        import tabs.stats as stats_module
+                        stats_module.render()
+                    except Exception as e:
+                        st.error(f"Error loading Stats tab: {e}")
+                        logger.error(f"Exception in Stats tab: {e}", exc_info=True)
                 elif tab_name == "FAQ":
                     import tabs.faq as faq_module
                     faq_module.render()
