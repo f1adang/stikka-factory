@@ -255,20 +255,25 @@ def render(printer_info, get_fonts, find_url, preper_image, print_image, img_con
             imgqr = qr.make_image(fill_color="black", back_color="white")
 
             if imgqr and img:
+                logger.debug("Both sticker and QR code present, concatenating images.")
                 imgqr = img_concat_v(img, imgqr,image_width=label_width)
                 st.image(imgqr, width='stretch')
                 if st.button("Print sticker+qr", key="print_sticker_qr"):
-                    print_image(img,printer_info=printer_info)
+                    logger.debug("Printing concatenated sticker and QR code.")
+                    print_image(imgqr,printer_info=printer_info)
+            
             elif imgqr and not (img):
+                logger.debug("Only QR code present, printing QR code.")
                 if st.button("Print sticker", key="print_qr_only"):
-                    print_image(img,printer_info=printer_info)
+                    print_image(imgqr,printer_info=printer_info)
         
         if text and not (qrurl):
+            logger.debug("Only text sticker present, printing label.")
             st.image(img, width='stretch')
             if st.button("Print sticker", key="print_text_only"):
                 print_image(img,printer_info=printer_info)
-                st.success("sticker sent to printer")
-        
+                st.success("sticker sent to printer")    
+                    
         st.markdown("""
             * label will automaticly resize to fit the longest line, so use linebreaks.
             * on pc `ctrl+enter` will submit, on mobile click outside the `text_area` to process.

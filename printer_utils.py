@@ -122,7 +122,7 @@ def get_printer_status(printer):
     if str(printer['model']) in FALLBACK_MODELS:
         printer['label_type'] = FALLBACK_LABEL_TYPE
         printer['label_width'] = get_label_width(FALLBACK_LABEL_TYPE)
-        printer['label_height'] = None
+        printer['label_height'] = 0
         printer['status'] = "Waiting to receive"
         logger.debug(f"Using fallback label type {printer['label_type']} for model {printer['model']}")
     else:
@@ -169,9 +169,6 @@ def get_printer_status(printer):
             logger.warning(f"Error getting status for printer {printer['name']}: {str(e)}")
             printer['status'] = str(e)
 
-
-
-
 def get_label_width(label_type):
     """Get the pixel width of a label type."""
     label_definitions = labels.ALL_LABELS
@@ -181,7 +178,6 @@ def get_label_width(label_type):
             logger.debug(f"Label type {label_type} width: {width} dots")
             return width
     raise ValueError(f"Label type {label_type} not found in label definitions")
-
 
 def print_image(image, printer_info, rotate=0, dither=False):
     """Queue a print job."""

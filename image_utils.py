@@ -95,8 +95,11 @@ def apply_histogram_equalization(image, black_point=0, white_point=255):
 
 def img_concat_v(im1, im2, image_width):
     """Vertically concatenate two images."""
+    logger.debug(f"Concatenating images vertically: im1 size {im1.size}, im2 size {im2.size}, target width {image_width}")
     dst = Image.new("RGB", (im1.width, im1.height + image_width))
     dst.paste(im1, (0, 0))
     im2 = im2.resize((image_width, image_width))
     dst.paste(im2, (0, im1.height))
+    logger.debug(f"Resulting image size: {dst.size}")
+    logger.debug(dst)   
     return dst
