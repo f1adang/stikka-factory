@@ -252,37 +252,25 @@ else:
         else:     
             st.sidebar.markdown(f":primary[**{p['name']}**]\n- Label Size: :{label_color}[{p['label_size']}]\n- Status:  :{status_color}[{p['status']}]")
     
-    # Stats section below Settings
-    st.sidebar.markdown("---")
-    try:
-        # Import stats functions with extra safety
-        try:
-            from stats_utils import get_prints_today, get_prints_total
-        except ImportError as ie:
-            logger.warning(f"Stats module not available: {ie}")
-            raise
-        except Exception as ie:
-            logger.warning(f"Error importing stats module: {ie}")
-            raise
-        
-        # Try to get stats values
-        try:
-            prints_today = get_prints_today()
-            prints_total = get_prints_total()
-        except Exception as se:
-            logger.warning(f"Error getting stats values: {se}")
-            raise
-        
-        # Display stats
-        st.sidebar.subheader(":primary[Stats]")
-        col1, col2 = st.sidebar.columns(2)
-        with col1:
-            st.sidebar.metric("Prints Today", prints_today)
-        with col2:
-            st.sidebar.metric("Prints Total", prints_total)
-    except Exception as e:
-        # Silently skip stats if there's any issue - don't crash the app
-        logger.warning(f"Failed to load stats in sidebar (skipping): {e}", exc_info=True)
+    # Stats section below Settings (completely optional - disabled if causing crashes)
+    # Comment out the entire block below if stats cause SIGILL crashes on Raspberry Pi
+    # st.sidebar.markdown("---")
+    # try:
+    #     import importlib
+    #     stats_module = importlib.import_module('stats_utils')
+    #     get_prints_today = getattr(stats_module, 'get_prints_today', None)
+    #     get_prints_total = getattr(stats_module, 'get_prints_total', None)
+    #     if get_prints_today and get_prints_total:
+    #         prints_today = get_prints_today()
+    #         prints_total = get_prints_total()
+    #         st.sidebar.subheader(":primary[Stats]")
+    #         col1, col2 = st.sidebar.columns(2)
+    #         with col1:
+    #             st.sidebar.metric("Prints Today", prints_today)
+    #         with col2:
+    #             st.sidebar.metric("Prints Total", prints_total)
+    # except Exception:
+    #     pass
 
 
 
@@ -389,12 +377,16 @@ else:
                         preper_image=preper_image,
                     )
                 elif tab_name == "Stats":
-                    try:
-                        import tabs.stats as stats_module
-                        stats_module.render()
-                    except Exception as e:
-                        st.error(f"Error loading Stats tab: {e}")
-                        logger.error(f"Exception in Stats tab: {e}", exc_info=True)
+                    # Stats tab disabled on Raspberry Pi due to SIGILL compatibility issues
+                    st.warning("⚠️ Statistics feature is currently disabled due to compatibility issues on this system.")
+                    st.info("Stats functionality has been temporarily disabled to prevent crashes.")
+                    # Uncomment below to enable stats tab if it works on your system:
+                    # try:
+                    #     import tabs.stats as stats_module
+                    #     stats_module.render()
+                    # except Exception as e:
+                    #     st.error(f"Error loading Stats tab: {e}")
+                    #     logger.error(f"Exception in Stats tab: {e}", exc_info=True)
                 elif tab_name == "FAQ":
                     import tabs.faq as faq_module
                     faq_module.render()

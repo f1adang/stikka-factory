@@ -4,7 +4,6 @@ import json
 import os
 import logging
 from datetime import datetime
-from pathlib import Path
 from collections import defaultdict
 
 logger = logging.getLogger("sticker_factory.stats_utils")

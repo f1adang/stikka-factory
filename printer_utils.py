@@ -245,20 +245,18 @@ def print_image(image, printer_info, rotate=0, dither=False):
             image.save(file_path, "PNG")
             status_container.success(f"Sticker saved as {filename}")
         
-        # Record statistics (fail silently if stats module has issues)
-        try:
-            try:
-                from stats_utils import record_print
-            except (ImportError, Exception) as ie:
-                logger.debug(f"Stats module not available, skipping recording: {ie}")
-                return True  # Print succeeded, just stats recording failed
-            
-            printer_name = printer_info['name']
-            printer_model = getattr(printer_info, 'model', None)
-            record_print(printer_name, printer_model)
-        except Exception as e:
-            # Don't let stats recording failure affect print success
-            logger.debug(f"Failed to record print stats (non-critical): {e}")
+        # Record statistics - DISABLED on Raspberry Pi due to SIGILL compatibility issues
+        # Uncomment below if stats module works on your system
+        # try:
+        #     import importlib
+        #     stats_module = importlib.import_module('stats_utils')
+        #     record_print = getattr(stats_module, 'record_print', None)
+        #     if record_print:
+        #         printer_name = printer_info['name']
+        #         printer_model = getattr(printer_info, 'model', None)
+        #         record_print(printer_name, printer_model)
+        # except Exception:
+        #     pass
         
         return True
     else:
