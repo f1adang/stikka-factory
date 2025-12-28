@@ -245,14 +245,20 @@ def print_image(image, printer_info, rotate=0, dither=False):
             image.save(file_path, "PNG")
             status_container.success(f"Sticker saved as {filename}")
         
-        # Record statistics
+        # Record statistics (fail silently if stats module has issues)
         try:
-            from stats_utils import record_print
+            try:
+                from stats_utils import record_print
+            except (ImportError, Exception) as ie:
+                logger.debug(f"Stats module not available, skipping recording: {ie}")
+                return True  # Print succeeded, just stats recording failed
+            
             printer_name = printer_info['name']
             printer_model = getattr(printer_info, 'model', None)
             record_print(printer_name, printer_model)
         except Exception as e:
-            logger.warning(f"Failed to record print stats: {e}")
+            # Don't let stats recording failure affect print success
+            logger.debug(f"Failed to record print stats (non-critical): {e}")
         
         return True
     else:

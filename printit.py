@@ -255,17 +255,34 @@ else:
     # Stats section below Settings
     st.sidebar.markdown("---")
     try:
-        from stats_utils import get_prints_today, get_prints_total
+        # Import stats functions with extra safety
+        try:
+            from stats_utils import get_prints_today, get_prints_total
+        except ImportError as ie:
+            logger.warning(f"Stats module not available: {ie}")
+            raise
+        except Exception as ie:
+            logger.warning(f"Error importing stats module: {ie}")
+            raise
+        
+        # Try to get stats values
+        try:
+            prints_today = get_prints_today()
+            prints_total = get_prints_total()
+        except Exception as se:
+            logger.warning(f"Error getting stats values: {se}")
+            raise
+        
+        # Display stats
         st.sidebar.subheader(":primary[Stats]")
-        prints_today = get_prints_today()
-        prints_total = get_prints_total()
         col1, col2 = st.sidebar.columns(2)
         with col1:
             st.sidebar.metric("Prints Today", prints_today)
         with col2:
             st.sidebar.metric("Prints Total", prints_total)
     except Exception as e:
-        logger.warning(f"Failed to load stats in sidebar: {e}")
+        # Silently skip stats if there's any issue - don't crash the app
+        logger.warning(f"Failed to load stats in sidebar (skipping): {e}", exc_info=True)
 
 
 

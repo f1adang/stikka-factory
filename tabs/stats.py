@@ -3,14 +3,31 @@
 import logging
 import streamlit as st
 from datetime import datetime, timedelta
-from stats_utils import get_stats_by_date, get_total_stats, get_stats_summary
 
 logger = logging.getLogger("sticker_factory.tabs.stats")
+
+# Lazy import stats_utils to avoid import-time issues
+def _get_stats_functions():
+    """Lazy import stats functions."""
+    try:
+        from stats_utils import get_stats_by_date, get_total_stats, get_stats_summary
+        return get_stats_by_date, get_total_stats, get_stats_summary
+    except Exception as e:
+        logger.error(f"Failed to import stats_utils: {e}", exc_info=True)
+        raise
 
 
 def render():
     """Render the Statistics tab."""
     st.subheader(":chart_with_upwards_trend: Print Statistics")
+    
+    # Lazy import stats functions
+    try:
+        get_stats_by_date, get_total_stats, get_stats_summary = _get_stats_functions()
+    except Exception as e:
+        st.error(f"Statistics module is not available: {e}")
+        st.info("Statistics tracking may be disabled or unavailable.")
+        return
     
     # Get summary stats
     summary = get_stats_summary()
@@ -42,45 +59,6 @@ def render():
         st.info("No print statistics available yet. Start printing to see statistics!")
         return
     
-    # Try to import pandas, but handle gracefully if it fails
-    try:
-        import pandas as pd
-        pandas_available = True
-    except Exception as e:
-        st.error(f"Pandas is not available: {e}")
-        st.info("Showing basic statistics without charts.")
-        pandas_available = False
-    
-    if not pandas_available:
-        # Fallback: show basic stats without pandas
-        st.subheader("Daily Print Counts")
-        for date_str in sorted(date_stats.keys(), reverse=True):
-            total_for_date = sum(date_stats[date_str].values())
-            st.write(f"**{date_str}**: {total_for_date} prints")
-        return
-    
-    # Convert to DataFrame for easier manipulation
-    df_data = []
-    for date_str, printers in date_stats.items():
-        for printer_name, count in printers.items():
-            df_data.append({
-                "date": datetime.strptime(date_str, "%Y-%m-%d"),
-                "printer": printer_name,
-                "count": count
-            })
-    
-    try:
-        df = pd.DataFrame(df_data)
-    except Exception as e:
-        st.error(f"Error creating DataFrame: {e}")
-        logger.error(f"Error creating DataFrame: {e}", exc_info=True)
-        # Fallback: show basic stats
-        st.subheader("Daily Print Counts")
-        for date_str in sorted(date_stats.keys(), reverse=True):
-            total_for_date = sum(date_stats[date_str].values())
-            st.write(f"**{date_str}**: {total_for_date} prints")
-        return
-    
     # Date range selector
     st.subheader("Time Range")
     date_range_options = ["Last 7 days", "Last 30 days", "Last 90 days", "All time"]
@@ -96,56 +74,69 @@ def render():
     else:
         cutoff_date = None
     
-    if cutoff_date:
-        df = df[df["date"] >= cutoff_date]
+    # Filter date_stats by cutoff_date
+    filtered_date_stats = {}
+    for date_str, printers in date_stats.items():
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d").date()
+        if cutoff_date is None or date_obj >= cutoff_date.date():
+            filtered_date_stats[date_str] = printers
     
-    if df.empty:
+    if not filtered_date_stats:
         st.info(f"No prints in the selected time range ({selected_range}).")
         return
     
+    # Prepare data for line chart (no pandas needed!)
+    # Streamlit charts work with dicts: {date: {printer: count}}
+    chart_data = {}
+    all_printers = set()
+    
+    # Collect all printer names
+    for printers in filtered_date_stats.values():
+        all_printers.update(printers.keys())
+    
+    # Build chart data structure: {date: {printer1: count1, printer2: count2}}
+    sorted_dates = sorted(filtered_date_stats.keys())
+    for date_str in sorted_dates:
+        chart_data[date_str] = {}
+        for printer in all_printers:
+            chart_data[date_str][printer] = filtered_date_stats[date_str].get(printer, 0)
+    
+    # Line chart - Streamlit can handle dict of dicts
+    st.subheader("Prints Over Time")
     try:
-        # Group by date and printer, sum counts
-        df_grouped = df.groupby(["date", "printer"])["count"].sum().reset_index()
-        
-        # Pivot for line chart
-        df_pivot = df_grouped.pivot(index="date", columns="printer", values="count").fillna(0)
-        
-        # Sort by date
-        df_pivot = df_pivot.sort_index()
-        
-        # Line chart
-        st.subheader("Prints Over Time")
-        st.line_chart(df_pivot, use_container_width=True)
-        
-        # Printer totals
-        st.subheader("Total Prints by Printer")
-        totals = get_total_stats()
-        
-        if totals:
-            # Create a DataFrame for the bar chart
-            totals_df = pd.DataFrame([
-                {"Printer": name, "Total Prints": count}
-                for name, count in sorted(totals.items(), key=lambda x: x[1], reverse=True)
-            ])
-            
-            st.bar_chart(totals_df.set_index("Printer"), use_container_width=True)
-            
-            # Show table with details
-            with st.expander("View Detailed Statistics"):
-                st.dataframe(totals_df, use_container_width=True, hide_index=True)
-        
-        # Daily breakdown table
-        st.subheader("Daily Breakdown")
-        daily_totals = df.groupby("date")["count"].sum().reset_index()
-        daily_totals.columns = ["Date", "Total Prints"]
-        daily_totals = daily_totals.sort_values("Date", ascending=False)
-        st.dataframe(daily_totals, use_container_width=True, hide_index=True)
+        st.line_chart(chart_data, use_container_width=True)
     except Exception as e:
-        st.error(f"Error displaying charts: {e}")
-        logger.error(f"Error displaying charts: {e}", exc_info=True)
-        # Fallback: show basic stats
+        logger.warning(f"Error rendering line chart: {e}")
+        # Fallback to simple display
         st.subheader("Daily Print Counts")
-        for date_str in sorted(date_stats.keys(), reverse=True):
-            total_for_date = sum(date_stats[date_str].values())
+        for date_str in sorted_dates:
+            total_for_date = sum(filtered_date_stats[date_str].values())
             st.write(f"**{date_str}**: {total_for_date} prints")
+    
+    # Printer totals
+    st.subheader("Total Prints by Printer")
+    totals = get_total_stats()
+    
+    if totals:
+        # Create bar chart data - Streamlit accepts dict directly
+        totals_sorted = dict(sorted(totals.items(), key=lambda x: x[1], reverse=True))
+        try:
+            st.bar_chart(totals_sorted, use_container_width=True)
+        except Exception as e:
+            logger.warning(f"Error rendering bar chart: {e}")
+        
+        # Show table with details (using Streamlit's native table)
+        with st.expander("View Detailed Statistics"):
+            table_data = [{"Printer": name, "Total Prints": count} 
+                          for name, count in totals_sorted.items()]
+            st.table(table_data)
+    
+    # Daily breakdown table
+    st.subheader("Daily Breakdown")
+    daily_totals_list = []
+    for date_str in sorted(filtered_date_stats.keys(), reverse=True):
+        total_for_date = sum(filtered_date_stats[date_str].values())
+        daily_totals_list.append({"Date": date_str, "Total Prints": total_for_date})
+    
+    st.table(daily_totals_list)
 
