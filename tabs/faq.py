@@ -19,7 +19,6 @@ def render():
         """
         - Originally developed by [TAMI](https://telavivmakers.org)
         - Brought to 39C3 by [SGMK](https://mechatronicart.ch/)
-        - AI slop by `FLUX1-schnell` on an Nvidia `L40S` at [cloudscale](https://cloudscale.ch)
         """
     )
     st.subheader("FAQ")
