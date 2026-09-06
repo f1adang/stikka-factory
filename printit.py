@@ -1,4 +1,5 @@
 import streamlit as st
+import base64
 import glob
 import os
 import re
@@ -172,8 +173,51 @@ if not os.path.exists(".streamlit/secrets.toml"):
     See the example file for all available options and their descriptions.
     """)
 
+SLOGAN = "Kleben und kleben lassen"
+
+
+@st.cache_data
+def _slogan_style(font_path, color):
+    """CSS that sets the slogan in the blackletter face.
+
+    The font is inlined as a data URI because Streamlit doesn't serve fonts/
+    over HTTP, so @font-face can't reference the file on disk. It also keeps
+    the slogan working on the printer hosts with no network. Cached so the
+    file isn't re-encoded on every rerun.
+    """
+    b64 = base64.b64encode(Path(font_path).read_bytes()).decode("ascii")
+    return f"""
+    <style>
+    @font-face {{
+        font-family: 'GermanicaSlogan';
+        src: url(data:font/ttf;base64,{b64}) format('truetype');
+        font-display: swap;
+    }}
+    .stikka-slogan {{
+        /* Emoji fall through to the system face; Germanica has no ❤ glyph. */
+        font-family: 'GermanicaSlogan', 'Apple Color Emoji', 'Segoe UI Emoji', serif;
+        /* Streamlit ships `.st-emotion-cache-<hash> p {{ font-size: inherit }}`,
+           which outranks a bare class selector. The hash changes with every
+           Streamlit release, so override it here rather than matching it. */
+        font-size: 2.1rem !important;
+        line-height: 1.35 !important;
+        letter-spacing: 0.02em;
+        color: {color};
+        margin: 0 0 1rem 0;
+    }}
+    </style>
+    """
+
+
 st.title(f":rainbow[**{APP_TITLE}**]")
-st.subheader(":primary[:heart: Kleben und kleben lassen :heart:]")
+try:
+    _primary = st.get_option("theme.primaryColor") or "#9673ff"
+    st.markdown(_slogan_style(DEFAULT_FONT, _primary), unsafe_allow_html=True)
+    st.markdown(f'<p class="stikka-slogan">❤️ {SLOGAN} ❤️</p>', unsafe_allow_html=True)
+except OSError as e:
+    # Font missing on this host - fall back to the plain themed subheader.
+    logger.warning(f"Could not load slogan font {DEFAULT_FONT}: {e}")
+    st.subheader(f":primary[:heart: {SLOGAN} :heart:]")
 
 
 # ============================================================================
