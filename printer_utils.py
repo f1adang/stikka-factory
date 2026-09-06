@@ -3,6 +3,7 @@
 import logging
 import subprocess
 import tempfile
+import threading
 import time
 import os
 from pathlib import Path
@@ -11,7 +12,8 @@ from brother_ql.backends import backend_factory
 from brother_ql import labels
 from brother_ql.raster import BrotherQLRaster
 from brother_ql.conversion import convert
-from brother_ql.backends.helpers import send
+from brother_ql.backends.helpers import get_printer
+from brother_ql.reader import interpret_response
 import usb.core
 from dataclasses import dataclass
 
@@ -20,6 +22,36 @@ from job_queue import print_queue
 from config_manager import PRIVACY_MODE, DEBUG_MODE, FALLBACK_LABEL_TYPE, FALLBACK_MODELS
 
 logger = logging.getLogger("sticker_factory.printer_utils")
+
+# Pre-2012 QL models have no status back-channel: they never answer the
+# "ESC i S" status request. Asking anyway makes brother_ql raise
+# NameError('Insufficient amount of data received', '') and the libusb
+# teardown that follows segfaults, leaving the device wedged for the next job.
+# For these models we use the configured fallback label type instead of asking.
+# (These are exactly the models brother_ql marks mode_setting=False.)
+MODELS_WITHOUT_STATUS = frozenset({"QL-500", "QL-550", "QL-560", "QL-570", "QL-700"})
+
+# Serialises every USB conversation with a printer. Printing happens on the
+# job-queue worker thread while Streamlit reruns call find_and_parse_printer()
+# on the main thread; without this both can hold a libusb handle on the same
+# device at once, which is what wedges the printer. Reentrant so that
+# find_and_parse_printer() can hold it across a loop whose body also takes it.
+_usb_lock = threading.RLock()
+
+# How long printer discovery waits for the bus before giving up. A print holds
+# the lock for up to ~10s; rather than freeze the Streamlit thread that long we
+# skip the refresh, and printit.py keeps showing the cached printer list.
+DISCOVERY_LOCK_TIMEOUT = 2.0
+
+# How long to let a status-less printer digest a job before we touch USB again.
+# Those models can't tell us when they are done, so this stands in for the
+# read-back we would otherwise wait on.
+STATUS_LESS_SETTLE_SECONDS = 1.5
+
+
+def model_has_status_channel(model):
+    """True if this model can answer a status request."""
+    return str(model) not in MODELS_WITHOUT_STATUS and str(model) not in FALLBACK_MODELS
 
 def safe_filename(text):
     epoch_time = int(time.time())
@@ -81,61 +113,76 @@ def find_and_parse_printer():
         found_printers.append(virtual_printer)
         logger.info("DEBUG MODE: Added virtual printer to available printers")
 
-    for backend_name in ["pyusb", "linux_kernel"]:
-        try:
-            logger.debug(f"Trying backend: {backend_name}")
-            backend = backend_factory(backend_name)
-            available_devices = backend["list_available_devices"]()
-            logger.debug(f"Found {len(available_devices)} devices with {backend_name} backend")
+    if not _usb_lock.acquire(timeout=DISCOVERY_LOCK_TIMEOUT):
+        logger.warning("Printer busy, skipping discovery this round")
+        return found_printers
+
+    try:
+        for backend_name in ["pyusb", "linux_kernel"]:
+            try:
+                logger.debug(f"Trying backend: {backend_name}")
+                backend = backend_factory(backend_name)
+                available_devices = backend["list_available_devices"]()
+                logger.debug(f"Found {len(available_devices)} devices with {backend_name} backend")
             
-            for printer in available_devices:
-                logger.debug(f"Found device: {printer}")
-                identifier = printer["identifier"]
-                parts = identifier.split("/")
+                for printer in available_devices:
+                    logger.debug(f"Found device: {printer}")
+                    identifier = printer["identifier"]
+                    parts = identifier.split("/")
 
-                if len(parts) < 4:
-                    logger.warning(f"Skipping device with invalid identifier format: {identifier}")
-                    continue
+                    if len(parts) < 4:
+                        logger.warning(f"Skipping device with invalid identifier format: {identifier}")
+                        continue
 
-                protocol = parts[0]
-                device_info = parts[2]
-                serial_number = parts[3]
+                    protocol = parts[0]
+                    device_info = parts[2]
+                    serial_number = parts[3]
                 
-                try:
-                    vendor_id, product_id = device_info.split(":")
-                except ValueError:
-                    logger.warning(f"Invalid device info format: {device_info}")
-                    continue
+                    try:
+                        vendor_id, product_id = device_info.split(":")
+                    except ValueError:
+                        logger.warning(f"Invalid device info format: {device_info}")
+                        continue
                 
-                try:
-                    product_id_int = int(product_id, 16)
-                    for m in model_manager.iter_elements():
-                        if m.product_id == product_id_int:
-                            model = m.identifier
-                            break
+                    try:
+                        product_id_int = int(product_id, 16)
+                    except ValueError:
+                        logger.warning(f"Invalid product ID format: {product_id}")
+                        continue
+
+                    model = next(
+                        (m.identifier for m in model_manager.iter_elements()
+                         if m.product_id == product_id_int),
+                        None,
+                    )
+                    if model is None:
+                        # Without this the name from the previous loop iteration
+                        # would leak in and mislabel the printer.
+                        logger.warning(f"No known model for product ID {product_id}, skipping {identifier}")
+                        continue
                     logger.debug(f"Matched printer model: {model}")
-                except ValueError:
-                    logger.warning(f"Invalid product ID format: {product_id}")
-                    continue
 
-                printer_info = PrinterInfo(
-                    identifier=identifier,
-                    backend=backend_name,
-                    model=model,
-                    protocol=protocol,
-                    vendor_id=vendor_id,
-                    product_id=product_id,
-                    serial_number=serial_number,
-                )
+                    printer_info = PrinterInfo(
+                        identifier=identifier,
+                        backend=backend_name,
+                        model=model,
+                        protocol=protocol,
+                        vendor_id=vendor_id,
+                        product_id=product_id,
+                        serial_number=serial_number,
+                    )
 
-                found_printers.append(printer_info)   
-                printer_info['name'] = f"{printer_info['model']} - {printer_info['serial_number'][-4:]}"
-                get_printer_status(printer_info)
-                logger.debug(f"Added printer: {printer_info}")
+                    found_printers.append(printer_info)   
+                    printer_info['name'] = f"{printer_info['model']} - {printer_info['serial_number'][-4:]}"
+                    get_printer_status(printer_info)
+                    logger.debug(f"Added printer: {printer_info}")
 
-        except Exception as e:
-            logger.error(f"Error with backend {backend_name}: {str(e)}")
-            continue    
+            except Exception as e:
+                logger.error(f"Error with backend {backend_name}: {str(e)}")
+                continue
+    finally:
+        _usb_lock.release()
+
     return found_printers
 
 
@@ -145,8 +192,11 @@ def get_printer_status(printer):
     printer['label_size'] = "unknown"
     printer['label_width'] = 0
     printer['label_height'] = 0
-    logger.debug(f"Checking if '{printer['model']}' is in FALLBACK_MODELS: {FALLBACK_MODELS}")
-    if str(printer['model']) in FALLBACK_MODELS:
+    logger.debug(
+        f"Checking if '{printer['model']}' can report status "
+        f"(FALLBACK_MODELS: {FALLBACK_MODELS}, no-status models: {sorted(MODELS_WITHOUT_STATUS)})"
+    )
+    if not model_has_status_channel(printer['model']):
         printer['label_type'] = FALLBACK_LABEL_TYPE
         printer['label_width'] = get_label_width(FALLBACK_LABEL_TYPE)
         printer['label_height'] = 0
@@ -154,9 +204,17 @@ def get_printer_status(printer):
         logger.debug(f"Using fallback label type {printer['label_type']} for model {printer['model']}")
     else:
         try:
-            cmd = f"brother_ql -b pyusb --model {printer['model']} -p {printer['identifier']} status"
-            logger.debug(f"Running status command: {cmd}")
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)
+            cmd = [
+                "brother_ql", "-b", "pyusb",
+                "--model", str(printer['model']),
+                "-p", str(printer['identifier']),
+                "status",
+            ]
+            logger.debug(f"Running status command: {' '.join(cmd)}")
+            # Held across the subprocess so we never open a second libusb
+            # handle on a device the print worker is currently using.
+            with _usb_lock:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
             
             # Log the raw output for debugging
             if result.stdout:
@@ -205,6 +263,68 @@ def get_label_width(label_type):
             logger.debug(f"Label type {label_type} width: {width} dots")
             return width
     raise ValueError(f"Label type {label_type} not found in label definitions")
+
+def _send_instructions(instructions, printer_info):
+    """Send raster instructions to a printer and always release the USB handle.
+
+    brother_ql's own send() never disposes the backend it opens - the handle
+    only goes away whenever __del__ happens to run. In a long-lived Streamlit
+    process that leaves the USB interface claimed after every print, so the
+    next libusb_open on the device (ours, or the `brother_ql status`
+    subprocess') fails or segfaults. Returns (success, message).
+    """
+    identifier = printer_info["identifier"]
+    model = printer_info["model"]
+    expects_status = model_has_status_channel(model)
+
+    try:
+        brother = get_printer(identifier, "pyusb")
+    except SystemExit:
+        # BrotherQLBackendPyUSB.__init__ calls sys.exit(1) when it can't claim
+        # the device. SystemExit is a BaseException, so left alone it would
+        # tear down the queue worker thread instead of failing this one job.
+        raise RuntimeError(f"Could not open printer {identifier} (busy or permission denied)")
+
+    try:
+        logger.info(f"Sending {len(instructions)} bytes to {printer_info['name']}")
+        brother.write(instructions)
+
+        if not expects_status:
+            # No back-channel to wait on: give the printer a moment to take the
+            # job before anything else touches the bus.
+            logger.debug(f"{model} cannot report status; skipping read-back")
+            time.sleep(STATUS_LESS_SETTLE_SECONDS)
+            return True, "Sent (printer does not report status)"
+
+        # Wait for the printer to confirm it printed and is free again.
+        did_print = ready = False
+        start = time.time()
+        while time.time() - start < 10:
+            data = brother.read()
+            if not data:
+                time.sleep(0.005)
+                continue
+            try:
+                result = interpret_response(data)
+            except (ValueError, NameError) as e:
+                logger.debug(f"Unparsable status response: {e}")
+                continue
+            if result["errors"]:
+                return False, f"Printer reported errors: {result['errors']}"
+            if result["status_type"] == "Printing completed":
+                did_print = True
+            if result["status_type"] == "Phase change" and result["phase_type"] == "Waiting to receive":
+                ready = True
+            if did_print and ready:
+                return True, None
+
+        logger.warning(f"No completion status from {printer_info['name']} within 10s")
+        return True, "Sent, but the printer did not confirm completion"
+    finally:
+        # The whole point of this function: hand the interface back.
+        brother.dispose()
+        logger.debug(f"Released USB handle for {identifier}")
+
 
 def print_image(image, printer_info, rotate=0, dither=False):
     """Queue a print job."""
@@ -324,17 +444,10 @@ def process_print_job(image, printer_info, temp_file_path, rotate=0, dither=Fals
         - Identifier: {printer_info['identifier']}
         """)
 
-        # Try to print using Python API
-        success = send(
-            instructions=instructions,
-            printer_identifier=printer_info["identifier"],
-            backend_identifier="pyusb"
-        )
-        
-        if not success:
-            return False, "Failed to print using Python API"
-
-        return True, None
+        # Held for the whole conversation so printer discovery on the main
+        # Streamlit thread can't open the same device mid-print.
+        with _usb_lock:
+            return _send_instructions(instructions, printer_info)
 
     except usb.core.USBError as e:
         # Treat timeout errors as successful since they often occur after print completion

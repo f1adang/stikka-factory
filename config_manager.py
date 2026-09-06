@@ -44,5 +44,8 @@ FILE_LOG_LEVEL = LOGGING_CONFIG.get("file_level", "WARNING")
 ENABLE_STDOUT = LOGGING_CONFIG.get("stdout", True)
 STDOUT_LOG_LEVEL = LOGGING_CONFIG.get("stdout_level", "INFO")
 
-FALLBACK_LABEL_TYPE = FALLBACK_CONFIG.get("label_type", "62")
-FALLBACK_MODELS = FALLBACK_CONFIG.get("models", {})
+# config.toml spells this "label"; "label_type" is accepted too. Coerced to
+# str because brother_ql's label identifiers are strings ("62"), so a bare
+# TOML integer would never match a label definition.
+FALLBACK_LABEL_TYPE = str(FALLBACK_CONFIG.get("label", FALLBACK_CONFIG.get("label_type", "62")))
+FALLBACK_MODELS = FALLBACK_CONFIG.get("models", [])
