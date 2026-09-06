@@ -177,13 +177,13 @@ SLOGAN = "Kleben und kleben lassen"
 
 
 @st.cache_data
-def _slogan_style(font_path, color):
-    """CSS that sets the slogan in the blackletter face.
+def _germanica_style(font_path, color):
+    """CSS that sets the title and slogan in the blackletter face.
 
     The font is inlined as a data URI because Streamlit doesn't serve fonts/
     over HTTP, so @font-face can't reference the file on disk. It also keeps
-    the slogan working on the printer hosts with no network. Cached so the
-    file isn't re-encoded on every rerun.
+    it working on the printer hosts with no network. Cached so the file isn't
+    re-encoded on every rerun.
     """
     b64 = base64.b64encode(Path(font_path).read_bytes()).decode("ascii")
     return f"""
@@ -205,6 +205,14 @@ def _slogan_style(font_path, color):
         color: {color};
         margin: 0 0 1rem 0;
     }}
+    /* st.title's h1. Scoped by testid so the sidebar's "Settings" h1, which
+       has no action elements, keeps the normal face. Streamlit paints the
+       :rainbow[] gradient as a background-image clipped to the text, so it
+       survives the font swap untouched - only the glyph shapes change. */
+    [data-testid="stHeadingWithActionElements"] h1 {{
+        font-family: 'GermanicaSlogan', 'Apple Color Emoji', 'Segoe UI Emoji', serif !important;
+        letter-spacing: 0.02em;
+    }}
     </style>
     """
 
@@ -212,7 +220,7 @@ def _slogan_style(font_path, color):
 st.title(f":rainbow[**{APP_TITLE}**]")
 try:
     _primary = st.get_option("theme.primaryColor") or "#9673ff"
-    st.markdown(_slogan_style(DEFAULT_FONT, _primary), unsafe_allow_html=True)
+    st.markdown(_germanica_style(DEFAULT_FONT, _primary), unsafe_allow_html=True)
     st.markdown(f'<p class="stikka-slogan">❤️ {SLOGAN} ❤️</p>', unsafe_allow_html=True)
 except OSError as e:
     # Font missing on this host - fall back to the plain themed subheader.
