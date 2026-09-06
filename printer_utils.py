@@ -366,18 +366,14 @@ def print_image(image, printer_info, rotate=0, dither=False):
             image.save(file_path, "PNG")
             status_container.success(f"Sticker saved as {filename}")
         
-        # Record statistics - DISABLED on Raspberry Pi due to SIGILL compatibility issues
-        # Uncomment below if stats module works on your system
-        # try:
-        #     import importlib
-        #     stats_module = importlib.import_module('stats_utils')
-        #     record_print = getattr(stats_module, 'record_print', None)
-        #     if record_print:
-        #         printer_name = printer_info['name']
-        #         printer_model = getattr(printer_info, 'model', None)
-        #         record_print(printer_name, printer_model)
-        # except Exception:
-        #     pass
+        # Stats are pure stdlib and never touch pandas/pyarrow, so they can't
+        # reintroduce the SIGILL that got this disabled. Still non-critical:
+        # a stats failure must not turn a successful print into a failure.
+        try:
+            from stats_utils import record_print
+            record_print(printer_info['name'], printer_info['model'])
+        except Exception as e:
+            logger.warning(f"Could not record print stats (non-critical): {e}")
         
         return True
     else:

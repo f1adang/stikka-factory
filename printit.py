@@ -309,25 +309,18 @@ else:
         else:     
             st.sidebar.markdown(f":primary[**{p['name']}**]\n- Label Size: :{label_color}[{p['label_size']}]\n- Status:  :{status_color}[{p['status']}]")
     
-    # Stats section below Settings (completely optional - disabled if causing crashes)
-    # Comment out the entire block below if stats cause SIGILL crashes on Raspberry Pi
-    # st.sidebar.markdown("---")
-    # try:
-    #     import importlib
-    #     stats_module = importlib.import_module('stats_utils')
-    #     get_prints_today = getattr(stats_module, 'get_prints_today', None)
-    #     get_prints_total = getattr(stats_module, 'get_prints_total', None)
-    #     if get_prints_today and get_prints_total:
-    #         prints_today = get_prints_today()
-    #         prints_total = get_prints_total()
-    #         st.sidebar.subheader(":primary[Stats]")
-    #         col1, col2 = st.sidebar.columns(2)
-    #         with col1:
-    #             st.sidebar.metric("Prints Today", prints_today)
-    #         with col2:
-    #             st.sidebar.metric("Prints Total", prints_total)
-    # except Exception:
-    #     pass
+    # Stats section below Settings. st.metric is a plain scalar widget - it
+    # doesn't serialise through Arrow, so it's safe on the print hosts.
+    st.sidebar.markdown("---")
+    try:
+        from stats_utils import get_dashboard_stats
+        _stats = get_dashboard_stats()
+        st.sidebar.subheader(":primary[Stats]")
+        _c1, _c2 = st.sidebar.columns(2)
+        _c1.metric("Prints Today", _stats["today"])
+        _c2.metric("Prints Total", _stats["total_prints"])
+    except Exception as e:
+        logger.warning(f"Could not show sidebar stats (skipping): {e}")
 
 
 
@@ -434,16 +427,8 @@ else:
                         preper_image=preper_image,
                     )
                 elif tab_name == "Stats":
-                    # Stats tab disabled on Raspberry Pi due to SIGILL compatibility issues
-                    st.warning("⚠️ Statistics feature is currently disabled due to compatibility issues on this system.")
-                    st.info("Stats functionality has been temporarily disabled to prevent crashes.")
-                    # Uncomment below to enable stats tab if it works on your system:
-                    # try:
-                    #     import tabs.stats as stats_module
-                    #     stats_module.render()
-                    # except Exception as e:
-                    #     st.error(f"Error loading Stats tab: {e}")
-                    #     logger.error(f"Exception in Stats tab: {e}", exc_info=True)
+                    import tabs.stats as stats_module
+                    stats_module.render()
                 elif tab_name == "FAQ":
                     import tabs.faq as faq_module
                     faq_module.render()

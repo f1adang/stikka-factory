@@ -1,143 +1,198 @@
-"""Statistics tracking utilities for print jobs."""
+"""Statistics tracking utilities for print jobs.
+
+Deliberately pure stdlib. Streamlit pulls in pandas/numpy/pyarrow anyway, but
+nothing here touches them: the stats feature was disabled once already because
+native code crashed the app on the Raspberry Pi hosts, and a SIGILL cannot be
+caught, so the only defence is not to call into that code at all.
+"""
 
 import json
-import os
 import logging
+import os
+import threading
 from datetime import datetime
 from collections import defaultdict
+from pathlib import Path
 
 logger = logging.getLogger("sticker_factory.stats_utils")
 
-STATS_FILE = "print_stats.json"
+# Anchored to the project directory rather than the cwd, so stats land in the
+# same place no matter where the app is launched from (systemd units on the
+# print hosts don't necessarily start in the repo root).
+STATS_FILE = Path(__file__).parent / "print_stats.json"
+
+# Keep the file bounded; a booth can print a lot over a weekend.
+MAX_RECORDS = 10000
+
+# record_print() runs on the print-queue worker thread while the Streamlit
+# threads read. Guards the read-modify-write so concurrent prints can't drop
+# each other's records.
+_stats_lock = threading.Lock()
 
 
 def load_stats():
-    """Load statistics from JSON file."""
+    """Load statistics. Returns a list of records, empty if there are none."""
     if not os.path.exists(STATS_FILE):
         return []
-    
+
     try:
-        with open(STATS_FILE, 'r') as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Error loading stats: {e}")
+        with open(STATS_FILE, "r") as f:
+            stats = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        # Don't return [] and let the next save overwrite a file we simply
+        # failed to parse - that would silently destroy the history. Move it
+        # aside so it can be recovered by hand.
+        logger.error(f"Could not read {STATS_FILE}: {e}")
+        _quarantine_corrupt_file()
         return []
+
+    if not isinstance(stats, list):
+        logger.error(f"{STATS_FILE} does not contain a list, ignoring it")
+        _quarantine_corrupt_file()
+        return []
+
+    return stats
+
+
+def _quarantine_corrupt_file():
+    """Rename an unreadable stats file instead of letting it be overwritten."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    try:
+        # Second resolution isn't unique enough - two bad reads in the same
+        # second would have the later backup clobber the earlier one, losing
+        # exactly the data this is meant to preserve. Probe for a free name.
+        backup = STATS_FILE.with_suffix(f".corrupt-{stamp}.json")
+        n = 1
+        while backup.exists():
+            backup = STATS_FILE.with_suffix(f".corrupt-{stamp}-{n}.json")
+            n += 1
+        os.replace(STATS_FILE, backup)
+        logger.warning(f"Moved unreadable stats file to {backup}")
+    except OSError as e:
+        logger.error(f"Could not set aside the corrupt stats file: {e}")
 
 
 def save_stats(stats):
-    """Save statistics to JSON file."""
+    """Write statistics atomically. Returns True on success."""
+    tmp = STATS_FILE.with_suffix(".tmp")
     try:
-        with open(STATS_FILE, 'w') as f:
+        # Write to a temp file and rename: os.replace is atomic, so pulling the
+        # power mid-write leaves the previous file intact rather than a
+        # half-written one that parses as nothing.
+        with open(tmp, "w") as f:
             json.dump(stats, f, indent=2)
-    except Exception as e:
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, STATS_FILE)
+        return True
+    except OSError as e:
         logger.error(f"Error saving stats: {e}")
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return False
 
 
 def record_print(printer_name, printer_model=None):
     """Record a successful print job."""
-    stats = load_stats()
-    
-    # Add new print record
     record = {
         "timestamp": datetime.now().isoformat(),
         "printer_name": printer_name,
         "printer_model": printer_model or "",
     }
-    
-    stats.append(record)
-    
-    # Keep only last 10000 records to prevent file from growing too large
-    if len(stats) > 10000:
-        stats = stats[-10000:]
-    
-    save_stats(stats)
+
+    with _stats_lock:
+        stats = load_stats()
+        stats.append(record)
+        if len(stats) > MAX_RECORDS:
+            stats = stats[-MAX_RECORDS:]
+        save_stats(stats)
+
     logger.debug(f"Recorded print for printer: {printer_name}")
 
 
-def get_stats_by_date(printer_name=None):
-    """
-    Get statistics grouped by date and printer.
-    
-    Returns:
-        dict: {date: {printer_name: count}}
+def _record_time(record):
+    """Parse a record's timestamp, or None if it's unusable."""
+    try:
+        return datetime.fromisoformat(record["timestamp"])
+    except (KeyError, TypeError, ValueError) as e:
+        logger.warning(f"Skipping record with bad timestamp: {e}")
+        return None
+
+
+def get_dashboard_stats():
+    """Everything the stats tab needs, from a single read of the file.
+
+    Rendering used to call four separate helpers, each re-reading and
+    re-parsing the whole file. Returns a dict with:
+        total_prints, printers {name: count}, by_date {date: {name: count}},
+        first_print, last_print, today
     """
     stats = load_stats()
-    date_stats = defaultdict(lambda: defaultdict(int))
-    
+
+    totals = defaultdict(int)
+    by_date = defaultdict(lambda: defaultdict(int))
+    times = []
+    today = datetime.now().date()
+    prints_today = 0
+
     for record in stats:
-        if printer_name and record.get("printer_name") != printer_name:
+        printer = record.get("printer_name") or "Unknown"
+        totals[printer] += 1
+
+        when = _record_time(record)
+        if when is None:
             continue
-        
-        # Parse timestamp and get date
-        try:
-            timestamp = datetime.fromisoformat(record["timestamp"])
-            date_str = timestamp.strftime("%Y-%m-%d")
-            printer = record.get("printer_name", "Unknown")
-            date_stats[date_str][printer] += 1
-        except Exception as e:
-            logger.warning(f"Error parsing timestamp: {e}")
-            continue
-    
-    return dict(date_stats)
+        by_date[when.date().isoformat()][printer] += 1
+        times.append(when)
+        if when.date() == today:
+            prints_today += 1
+
+    return {
+        "total_prints": len(stats),
+        "printers": dict(totals),
+        "by_date": {d: dict(p) for d, p in by_date.items()},
+        # Full timestamps, not dates: the tab renders "last print N minutes ago".
+        "first_print": min(times).isoformat() if times else None,
+        "last_print": max(times).isoformat() if times else None,
+        "today": prints_today,
+    }
+
+
+def get_stats_by_date(printer_name=None):
+    """Statistics grouped by date and printer: {date: {printer_name: count}}."""
+    by_date = get_dashboard_stats()["by_date"]
+    if printer_name is None:
+        return by_date
+    return {
+        date: {p: c for p, c in printers.items() if p == printer_name}
+        for date, printers in by_date.items()
+        if printer_name in printers
+    }
 
 
 def get_total_stats():
-    """Get total statistics per printer."""
-    stats = load_stats()
-    totals = defaultdict(int)
-    
-    for record in stats:
-        printer = record.get("printer_name", "Unknown")
-        totals[printer] += 1
-    
-    return dict(totals)
+    """Total prints per printer."""
+    return get_dashboard_stats()["printers"]
 
 
 def get_stats_summary():
-    """Get summary statistics."""
-    stats = load_stats()
-    totals = get_total_stats()
-    
-    if not stats:
-        return {
-            "total_prints": 0,
-            "printers": {},
-            "first_print": None,
-            "last_print": None,
-        }
-    
-    # Get first and last print timestamps
-    timestamps = [datetime.fromisoformat(r["timestamp"]) for r in stats if "timestamp" in r]
-    timestamps.sort()
-    
+    """Summary statistics."""
+    data = get_dashboard_stats()
     return {
-        "total_prints": len(stats),
-        "printers": totals,
-        "first_print": timestamps[0].isoformat() if timestamps else None,
-        "last_print": timestamps[-1].isoformat() if timestamps else None,
+        "total_prints": data["total_prints"],
+        "printers": data["printers"],
+        "first_print": data["first_print"],
+        "last_print": data["last_print"],
     }
 
 
 def get_prints_today():
-    """Get count of prints made today (resets at midnight)."""
-    stats = load_stats()
-    today = datetime.now().date()
-    count = 0
-    
-    for record in stats:
-        try:
-            timestamp = datetime.fromisoformat(record["timestamp"])
-            if timestamp.date() == today:
-                count += 1
-        except Exception as e:
-            logger.warning(f"Error parsing timestamp: {e}")
-            continue
-    
-    return count
+    """Count of prints made today (resets at midnight)."""
+    return get_dashboard_stats()["today"]
 
 
 def get_prints_total():
-    """Get total count of all prints."""
-    stats = load_stats()
-    return len(stats)
-
+    """Total count of all prints."""
+    return get_dashboard_stats()["total_prints"]
