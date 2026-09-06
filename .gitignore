@@ -123,7 +123,10 @@ venv.bak/
 
 fonts/*.ttf
 fonts/*.otf
-!fonts/5x5-Tami.tt
+!fonts/5x5-Tami.ttf
+# Germanica (Lloyd, dafont: 100% free, fsType 0) - shipped so the
+# printer hosts get it from a git pull rather than a manual copy.
+!fonts/*Germanica.ttf
 
 # debug dir
 debug/*
