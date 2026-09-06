@@ -97,18 +97,23 @@ def list_saved_images(filter_duplicates=True):
 
     return sorted(unique_images.values(), key=os.path.getmtime, reverse=True)[:HISTORY_LIMIT]
 
+# Listed first by get_fonts(), which makes it the pre-selected font in the
+# label tab (it defaults to fonts[0]).
+DEFAULT_FONT = "fonts/Shadowed Germanica.ttf"
+
+
 def get_fonts():
-    """Return list of fonts with 5x5-Tami.ttf as default, followed by system fonts (TTF and OTF)"""
+    """Return list of fonts with DEFAULT_FONT first, then the rest of fonts/, then system fonts (TTF and OTF)"""
     fonts = []
     
-    default_font = "fonts/5x5-Tami.ttf"
-    if os.path.exists(default_font):
-        fonts.append(default_font)
+    if os.path.exists(DEFAULT_FONT):
+        fonts.append(DEFAULT_FONT)
     
     try:
         for font_file in os.listdir("fonts/"):
-            if (font_file.endswith(".ttf") or font_file.endswith(".otf")) and font_file != "5x5-Tami.ttf":
-                fonts.append("fonts/" + font_file)
+            font_path = "fonts/" + font_file
+            if font_file.endswith((".ttf", ".otf")) and font_path != DEFAULT_FONT:
+                fonts.append(font_path)
     except OSError:
         pass
     
@@ -142,7 +147,7 @@ def get_fonts():
             seen.add(font)
             unique_fonts.append(font)
     
-    return unique_fonts if unique_fonts else ["fonts/5x5-Tami.ttf"]
+    return unique_fonts if unique_fonts else [DEFAULT_FONT]
 
 label_dir = "labels"
 os.makedirs(label_dir, exist_ok=True)
