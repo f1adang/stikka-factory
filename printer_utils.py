@@ -198,6 +198,7 @@ def get_printer_status(printer):
     )
     if not model_has_status_channel(printer['model']):
         printer['label_type'] = FALLBACK_LABEL_TYPE
+        printer['label_size'] = f"{FALLBACK_LABEL_TYPE}mm"
         printer['label_width'] = get_label_width(FALLBACK_LABEL_TYPE)
         printer['label_height'] = 0
         printer['status'] = "Waiting to receive"
