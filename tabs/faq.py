@@ -10,7 +10,7 @@ def render():
     st.markdown(
         """
         - Web: [stikka.art](https://stikka.art)
-        - Repo: [GitHub](https://github.com/morgulbrut/stikka-factory)
+        - Repo: [GitHub](https://github.com/f1adang/stikka-factory/tree/gandalf/dresden)
         - Social: [@stikka](https://chaos.social/@stikka)
         """
     )
