@@ -389,11 +389,27 @@ def print_image(image, printer_info, rotate=0, dither=False):
         # Stats are pure stdlib and never touch pandas/pyarrow, so they can't
         # reintroduce the SIGILL that got this disabled. Still non-critical:
         # a stats failure must not turn a successful print into a failure.
+        sticker_number = None
         try:
-            from stats_utils import record_print
+            from stats_utils import record_print, get_prints_total
             record_print(printer_info['name'], printer_info['model'])
+            # Recorded first so the receipt can number this sticker.
+            sticker_number = get_prints_total()
         except Exception as e:
             logger.warning(f"Could not record print stats (non-critical): {e}")
+
+        # Receipt on the ESC/POS printer, if one is configured and plugged in.
+        # print_receipt() swallows its own errors; the sticker already printed.
+        try:
+            from receipt_utils import print_receipt
+            print_receipt(
+                printer_name=printer_info['name'],
+                media=printer_info['media'],
+                sticker_number=sticker_number,
+                image=image,
+            )
+        except Exception as e:
+            logger.warning(f"Could not print receipt (non-critical): {e}")
         
         return True
     else:

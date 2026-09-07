@@ -324,6 +324,19 @@ else:
     for p in printers:
         st.sidebar.markdown(printer_summary(p, selected=p['name'] == selected_printer['name']))
     
+    # Receipt printer state. A receipt failing is non-fatal by design, so
+    # without this the operator would never notice it had stopped working.
+    try:
+        from receipt_utils import describe_printer, is_enabled as receipts_enabled
+        if receipts_enabled():
+            _rx_ok, _rx_label = describe_printer()
+            st.sidebar.markdown(
+                f":primary[**Receipt printer**]\n"
+                f"- :{'green' if _rx_ok else 'red'}[{_rx_label}]"
+            )
+    except Exception as e:
+        logger.warning(f"Could not check the receipt printer (skipping): {e}")
+
     # Stats section below Settings. st.metric is a plain scalar widget - it
     # doesn't serialise through Arrow, so it's safe on the print hosts.
     st.sidebar.markdown("---")

@@ -58,3 +58,22 @@ label = 62
 # the serial number itself. Anything not listed shows as "not configured".
 "QL-570 - 9037" = "transparent"
 "QL-500 - 8169" = "white"
+
+[receipt]
+# Prints a small receipt on an ESC/POS thermal printer after every sticker.
+# Set up for the Epson TM-T20III (labelled M267D) at 04b8:0e28. TOML has no
+# hex literals, so the ids are strings.
+enabled = true
+vendor_id = "0x04b8"
+product_id = "0x0e28"
+# 576 dots = 72mm printable on 80mm paper; use 384 for a 58mm roll.
+width_dots = 576
+# Cap on the sticker preview. Vertical labels can be a metre long, which
+# scaled to the full receipt width would eat a lot of paper.
+max_image_dots = 480
+show_image = true
+header = "STIKKA CENTRAAL"
+footer = "Kleben und kleben lassen"
+feed_lines = 2
+cut = true
+timeout_ms = 5000

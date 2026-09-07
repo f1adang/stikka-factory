@@ -33,6 +33,7 @@ TABS_CONFIG = CONFIG.get("tabs", {})
 LOGGING_CONFIG = CONFIG.get("logging", {})
 FALLBACK_CONFIG = CONFIG.get("fallback", {})
 MEDIA_CONFIG = CONFIG.get("media", {})
+RECEIPT_CONFIG = CONFIG.get("receipt", {})
 
 PRIVACY_MODE = APP_CONFIG.get("privacy_mode", True)
 ENABLE_COMFY = APP_CONFIG.get("enable_comfy", False)
