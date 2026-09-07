@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import streamlit as st
 from job_queue import print_queue
-from config_manager import PRIVACY_MODE, DEBUG_MODE, FALLBACK_LABEL_TYPE, FALLBACK_MODELS
+from config_manager import PRIVACY_MODE, DEBUG_MODE, FALLBACK_LABEL_TYPE, FALLBACK_MODELS, MEDIA_TYPES
 
 logger = logging.getLogger("sticker_factory.printer_utils")
 
@@ -49,6 +49,21 @@ DISCOVERY_LOCK_TIMEOUT = 2.0
 STATUS_LESS_SETTLE_SECONDS = 1.5
 
 
+def get_media_type(name, serial_number=""):
+    """Configured paper for a printer, or "" if it isn't listed.
+
+    A [media] key may be the displayed name ("QL-500 - 8169"), the full
+    serial, or its last four characters, whichever the operator finds easier.
+    Matching is exact against those three - note that a name key embeds the
+    model, so it stops matching if model detection ever changes; key by serial
+    to be immune to that.
+    """
+    for key in (name, serial_number, str(serial_number)[-4:]):
+        if key and key in MEDIA_TYPES:
+            return MEDIA_TYPES[key]
+    return ""
+
+
 def model_has_status_channel(model):
     """True if this model can answer a status request."""
     return str(model) not in MODELS_WITHOUT_STATUS and str(model) not in FALLBACK_MODELS
@@ -72,6 +87,9 @@ class PrinterInfo:
     label_size : str = "unknown"
     label_width: int = 0
     label_height: int = 0
+    # What paper is loaded. These models can't report it, so it comes from
+    # config.toml's [media] section; empty means nobody has said.
+    media: str = ""
     
     def __getitem__(self, item):
         return getattr(self, item)
@@ -96,6 +114,7 @@ def create_virtual_printer():
         label_size=f"{FALLBACK_LABEL_TYPE}mm",
         label_width=get_label_width(FALLBACK_LABEL_TYPE),
         label_height=None,
+        media=get_media_type("Virtual Debug Printer", "DEBUG-0000") or "virtual",
     )
     logger.info("Created virtual debug printer")
     return virtual_printer
@@ -174,6 +193,7 @@ def find_and_parse_printer():
 
                     found_printers.append(printer_info)   
                     printer_info['name'] = f"{printer_info['model']} - {printer_info['serial_number'][-4:]}"
+                    printer_info['media'] = get_media_type(printer_info['name'], printer_info['serial_number'])
                     get_printer_status(printer_info)
                     logger.debug(f"Added printer: {printer_info}")
 

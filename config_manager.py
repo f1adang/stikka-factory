@@ -32,6 +32,7 @@ UI_CONFIG = CONFIG.get("ui", {})
 TABS_CONFIG = CONFIG.get("tabs", {})
 LOGGING_CONFIG = CONFIG.get("logging", {})
 FALLBACK_CONFIG = CONFIG.get("fallback", {})
+MEDIA_CONFIG = CONFIG.get("media", {})
 
 PRIVACY_MODE = APP_CONFIG.get("privacy_mode", True)
 ENABLE_COMFY = APP_CONFIG.get("enable_comfy", False)
@@ -49,3 +50,6 @@ STDOUT_LOG_LEVEL = LOGGING_CONFIG.get("stdout_level", "INFO")
 # TOML integer would never match a label definition.
 FALLBACK_LABEL_TYPE = str(FALLBACK_CONFIG.get("label", FALLBACK_CONFIG.get("label_type", "62")))
 FALLBACK_MODELS = FALLBACK_CONFIG.get("models", [])
+
+# {printer name or serial: paper description}, e.g. "QL-500 - 8169" = "white".
+MEDIA_TYPES = {str(k): str(v) for k, v in MEDIA_CONFIG.items()}

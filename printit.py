@@ -281,8 +281,30 @@ for p in printers:
 
 logger.info(f"Total available printers: {len(available_printers)}")
 
+def printer_summary(p, selected=False):
+    """Sidebar block for one printer: paper, label size and status."""
+    media = p['media'] or "not configured"
+    media_color = "green" if p['media'] else "red"
+    label_color = "green" if p['label_type'] != 'unknown' else "red"
+    status_color = "green" if p['status'] == 'Waiting to receive' else "red"
+    return (
+        f":{'green' if selected else 'primary'}[**{p['name']}**]\n"
+        f"- Paper: :{media_color}[{media}]\n"
+        f"- Label Size: :{label_color}[{p['label_size']}]\n"
+        f"- Status:  :{status_color}[{p['status']}]"
+    )
+
+
 st.sidebar.subheader(":primary[Printer Selection]")
-printer = st.sidebar.radio("**Available Printer**", available_printers)
+
+# The radio spells out the paper so it's visible at the moment of choosing,
+# not just further down the sidebar.
+media_by_name = {p["name"]: p["media"] for p in printers}
+printer = st.sidebar.radio(
+    "**Available Printer**",
+    available_printers,
+    format_func=lambda name: f"{name} · {media_by_name[name]}" if media_by_name.get(name) else name,
+)
 selected_printer = next((p for p in printers if p["name"] == printer), None)
 
 if not selected_printer:
@@ -290,9 +312,7 @@ if not selected_printer:
     
     st.sidebar.subheader("Detected Printers")
     for p in printers:
-        status_color = "green" if p['status'] == 'Waiting to receive' else "red"
-        label_color = "green" if p['label_type'] != 'unknown' else "red"
-        st.sidebar.markdown(f":primary[**{p['name']}**]\n- Label Size: :{label_color}[{p['label_size']}]\n- Status:  :{status_color}[{p['status']}]")
+        st.sidebar.markdown(printer_summary(p))
     #st.stop()   
 
 else:
@@ -301,13 +321,8 @@ else:
     label_width = selected_printer['label_width']
 
     st.sidebar.subheader(":primary[Detected Printers]")
-    for p in printers: 
-        status_color = "green" if p['status'] == 'Waiting to receive' else "red"
-        label_color = "green" if p['label_type'] != 'unknown' else "red"
-        if p.name == selected_printer['name']:
-            st.sidebar.markdown(f":green[**{p['name']}**]\n- Label Size: :{label_color}[{p['label_size']}]\n- Status:  :{status_color}[{p['status']}]")
-        else:     
-            st.sidebar.markdown(f":primary[**{p['name']}**]\n- Label Size: :{label_color}[{p['label_size']}]\n- Status:  :{status_color}[{p['status']}]")
+    for p in printers:
+        st.sidebar.markdown(printer_summary(p, selected=p['name'] == selected_printer['name']))
     
     # Stats section below Settings. st.metric is a plain scalar widget - it
     # doesn't serialise through Arrow, so it's safe on the print hosts.
@@ -323,6 +338,16 @@ else:
         logger.warning(f"Could not show sidebar stats (skipping): {e}")
 
 
+
+    # Users pick a printer once and then work inside a tab, so keep the loaded
+    # paper visible next to the thing they're about to print.
+    if selected_printer['media']:
+        st.info(f"Printing on **{selected_printer['name']}** — **{selected_printer['media']}** paper")
+    else:
+        st.warning(
+            f"Printing on **{selected_printer['name']}** — paper not configured. "
+            f"Add it under `[media]` in `config.toml`."
+        )
 
     # Get enabled tabs from configuration
     enabled_tab_names = get_enabled_tabs()

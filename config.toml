@@ -50,3 +50,11 @@ models = [
     "QL-570"
 ]
 label = 62
+
+[media]
+# What paper is loaded in each printer, so users can see it before they print.
+# These models can't report their media, so it has to be stated here.
+# Key by the name shown in the UI ("<model> - <last 4 of the serial>") or by
+# the serial number itself. Anything not listed shows as "not configured".
+"QL-570 - 9037" = "transparent"
+"QL-500 - 8169" = "white"
