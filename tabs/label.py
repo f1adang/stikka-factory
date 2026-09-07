@@ -36,6 +36,108 @@ def render(printer_info, get_fonts, find_url, preper_image, print_image, img_con
         padding = 20
         return total_height + (padding * 2)
 
+    def measure_text_block(text, font, line_spacing):
+        """(width, height) of the rendered text block, padding excluded."""
+        draw = ImageDraw.Draw(Image.new("RGB", (1, 1), color="white"))
+        ascent, descent = font.getmetrics()
+        font_height = ascent + descent
+        widths = []
+        total_height = 0
+        lines = text.split("\n")
+
+        for line in lines:
+            if line.strip():
+                bbox = draw.textbbox((0, 0), line, font=font)
+                widths.append(bbox[2] - bbox[0])
+                total_height += max(bbox[3] - bbox[1], font_height)
+            else:
+                widths.append(0)
+                total_height += font_height
+
+        total_height += line_spacing * max(len(lines) - 1, 0)
+        return (max(widths) if widths else 0), total_height
+
+    def calculate_max_font_size_vertical(target_height, text, font_path,
+                                         line_spacing=20, padding=20, hard_max=1400):
+        """Largest font size whose stacked lines span the tape width.
+
+        A vertical label is rotated 90 degrees, so the height of the text block
+        becomes the 62mm tape width while its length runs down the tape, which
+        is effectively unbounded. That inverts the usual constraint and lets
+        the type get far bigger than horizontal text allows.
+
+        Binary search rather than the linear scan used for horizontal text:
+        sizes here run into the hundreds and every probe rasterises metrics.
+        """
+        budget = target_height - padding * 2
+        if budget <= 0:
+            return 20
+
+        low, high, best = 8, hard_max, 8
+        while low <= high:
+            mid = (low + high) // 2
+            try:
+                probe = ImageFont.truetype(font_path, mid)
+            except (OSError, TypeError):
+                return 50
+            _, height = measure_text_block(text, probe, line_spacing)
+            if height <= budget:
+                best = mid
+                low = mid + 1
+            else:
+                high = mid - 1
+        return best
+
+    def render_vertical_label(text, font, label_width, alignment, line_spacing, reads_down):
+        """Draw the text sideways, then rotate it onto the tape.
+
+        The canvas is built label_width tall so that after the 90 degree turn
+        the image is exactly label_width wide, which is what the printer wants.
+        """
+        padding = 20
+        block_width, block_height = measure_text_block(text, font, line_spacing)
+        canvas_width = max(block_width + padding * 2, 1)
+        canvas = Image.new("RGB", (canvas_width, label_width), color="white")
+        draw = ImageDraw.Draw(canvas)
+
+        ascent, descent = font.getmetrics()
+        font_height = ascent + descent
+        y = max((label_width - block_height) // 2, 0)
+
+        for line in text.split("\n"):
+            if line.strip():
+                bbox = draw.textbbox((0, y), line, font=font)
+                text_width = bbox[2] - bbox[0]
+                text_height = max(bbox[3] - bbox[1], font_height)
+            else:
+                text_width = 0
+                text_height = font_height
+
+            if alignment == "center":
+                x = (canvas_width - text_width) // 2
+            elif alignment == "right":
+                x = canvas_width - text_width - padding
+            else:
+                x = padding
+
+            draw.text((x, y), line, font=font, fill=(0, 0, 0))
+            y += text_height + line_spacing
+
+        # Row 0 of the image leaves the printer first. ROTATE_270 puts the
+        # start of the text there, so the label reads downwards as it feeds out.
+        return canvas.transpose(Image.ROTATE_270 if reads_down else Image.ROTATE_90)
+
+    def max_label_dots(model):
+        """Longest label this model can print, or None if it can't be read."""
+        try:
+            from brother_ql.models import ModelsManager
+            for m in ModelsManager().iter_elements():
+                if m.identifier == model:
+                    return m.min_max_length_dots[1]
+        except Exception as e:
+            logger.debug(f"Could not read max label length for {model}: {e}")
+        return None
+
     def calculate_max_font_size(width, text, font_path, start_size=10, end_size=200, step=1):
         try:
             draw = ImageDraw.Draw(Image.new("RGB", (1, 1), color="white"))
@@ -60,7 +162,21 @@ def render(printer_info, get_fonts, find_url, preper_image, print_image, img_con
             return 50
 
     text = st.text_area("Enter your text to print", "write something", height=200)
-    
+
+    vertical = st.checkbox(
+        "Vertical text (along the tape)",
+        value=False,
+        help=f"Turn the text 90 degrees so it runs down the tape. The type is "
+             f"sized to fill the full {label_type}mm width and the label grows "
+             f"as long as it needs to be.",
+    )
+    reads_down = True
+    if vertical:
+        reads_down = st.radio(
+            "Reading direction", ["Downwards", "Upwards"],
+            horizontal=True, key="label_vertical_direction",
+        ) == "Downwards"
+
     if text:
         urls = find_url(text)
         if urls:
@@ -110,27 +226,31 @@ def render(printer_info, get_fonts, find_url, preper_image, print_image, img_con
                     st.stop()
 
         try:
-            chars_per_line = max(len(line) for line in text.split('\n'))
-            if chars_per_line == 0:
-                chars_per_line = 1
-            
-            if label_type == "62":
-                base_font_size = 60
-                base_width = 696
-            elif label_type == "102":
-                base_font_size = 107
-                base_width = 1164
+            if vertical:
+                # Fill the tape width; the length is what gives instead.
+                font_size = calculate_max_font_size_vertical(label_width, text, font)
             else:
-                base_font_size = 60
-                base_width = 696
-            
-            width_scale = label_width / base_width
-            scaled_base_size = int(base_font_size * width_scale)
-            base_text_length = 14
-            text_scale = base_text_length / chars_per_line
-            font_size = int(scaled_base_size * text_scale)
-            font_size = max(font_size, 20)
-            
+                chars_per_line = max(len(line) for line in text.split('\n'))
+                if chars_per_line == 0:
+                    chars_per_line = 1
+
+                if label_type == "62":
+                    base_font_size = 60
+                    base_width = 696
+                elif label_type == "102":
+                    base_font_size = 107
+                    base_width = 1164
+                else:
+                    base_font_size = 60
+                    base_width = 696
+
+                width_scale = label_width / base_width
+                scaled_base_size = int(base_font_size * width_scale)
+                base_text_length = 14
+                text_scale = base_text_length / chars_per_line
+                font_size = int(scaled_base_size * text_scale)
+                font_size = max(font_size, 20)
+
             max_size = font_size
         except Exception as e:
             max_size = 60
@@ -181,7 +301,9 @@ def render(printer_info, get_fonts, find_url, preper_image, print_image, img_con
                 alignment = st.selectbox("Choose text alignment", alignment_options, index=1)
             
             try:
-                if font == "fonts/5x5-Tami.ttf":
+                if vertical:
+                    max_size = calculate_max_font_size_vertical(label_width, text, font)
+                elif font == "fonts/5x5-Tami.ttf":
                     chars_per_line = max(len(line) for line in text.split('\n'))
                     if chars_per_line == 0:
                         chars_per_line = 1
@@ -218,33 +340,50 @@ def render(printer_info, get_fonts, find_url, preper_image, print_image, img_con
                 st.error(f"Error loading font: {load_e}")
         
         line_spacing = 20
-        new_image_height = calculate_actual_image_height_with_empty_lines(text, fnt, line_spacing)
-        padding = 20
-        img = Image.new("RGB", (label_width, new_image_height), color="white")
-        d = ImageDraw.Draw(img)
-        y = padding
+        if vertical:
+            img = render_vertical_label(text, fnt, label_width, alignment,
+                                        line_spacing, reads_down)
 
-        for line in text.split("\n"):
-            text_width = 0
-            ascent, descent = fnt.getmetrics()
-            font_height = ascent + descent
-
-            if line.strip():
-                bbox = d.textbbox((0, y), line, font=fnt)
-                text_width = bbox[2] - bbox[0]
-                text_height = max(bbox[3] - bbox[1], font_height)
+            # Filling the width sideways makes for long labels, so say how long.
+            length_mm = img.height * 25.4 / 300
+            limit = max_label_dots(printer_info["model"])
+            if limit and img.height > limit:
+                st.error(
+                    f"This label would be {length_mm / 10:.0f} cm long, over the "
+                    f"{limit * 25.4 / 300 / 10:.0f} cm maximum for the "
+                    f"{printer_info['model']}. Shorten the text, or add a line "
+                    f"break to stack it across the tape."
+                )
             else:
-                text_height = font_height
+                st.caption(f"Label length: {length_mm / 10:.1f} cm at font size {font_size}")
+        else:
+            new_image_height = calculate_actual_image_height_with_empty_lines(text, fnt, line_spacing)
+            padding = 20
+            img = Image.new("RGB", (label_width, new_image_height), color="white")
+            d = ImageDraw.Draw(img)
+            y = padding
 
-            if alignment == "center":
-                x = (label_width - text_width) // 2
-            elif alignment == "right":
-                x = label_width - text_width
-            else:
-                x = 0
+            for line in text.split("\n"):
+                text_width = 0
+                ascent, descent = fnt.getmetrics()
+                font_height = ascent + descent
 
-            d.text((x, y), line, font=fnt, fill=(0, 0, 0))
-            y += text_height + line_spacing
+                if line.strip():
+                    bbox = d.textbbox((0, y), line, font=fnt)
+                    text_width = bbox[2] - bbox[0]
+                    text_height = max(bbox[3] - bbox[1], font_height)
+                else:
+                    text_height = font_height
+
+                if alignment == "center":
+                    x = (label_width - text_width) // 2
+                elif alignment == "right":
+                    x = label_width - text_width
+                else:
+                    x = 0
+
+                d.text((x, y), line, font=fnt, fill=(0, 0, 0))
+                y += text_height + line_spacing
 
         qr = qrcode.QRCode(border=0)
         qrurl = st.text_input("add a QRcode to your sticker")
@@ -276,5 +415,6 @@ def render(printer_info, get_fonts, find_url, preper_image, print_image, img_con
                     
         st.markdown("""
             * label will automaticly resize to fit the longest line, so use linebreaks.
+            * *vertical text* turns the label sideways and sizes the type to the full tape width - line breaks stack across the tape instead of down it.
             * on pc `ctrl+enter` will submit, on mobile click outside the `text_area` to process.
         """)
