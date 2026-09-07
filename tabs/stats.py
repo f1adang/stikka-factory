@@ -103,6 +103,7 @@ def render():
 
     try:
         from stats_utils import get_dashboard_stats
+        from printer_utils import display_name
         data = get_dashboard_stats()
     except Exception as e:
         logger.error(f"Failed to load stats: {e}", exc_info=True)
@@ -152,12 +153,15 @@ def render():
     for printers in filtered.values():
         for name, count in printers.items():
             range_totals[name] = range_totals.get(name, 0) + count
-    ranked = sorted(range_totals.items(), key=lambda kv: kv[1], reverse=True)
+    # Records store the full name; show it the way the rest of the UI does.
+    ranked = [(display_name(n), c)
+              for n, c in sorted(range_totals.items(), key=lambda kv: kv[1], reverse=True)]
     st.markdown(_bar_chart(ranked, accent), unsafe_allow_html=True)
 
     with st.expander("Detailed statistics"):
         st.markdown("**By printer** (all time)")
-        all_time = sorted(data["printers"].items(), key=lambda kv: kv[1], reverse=True)
+        all_time = [(display_name(n), c) for n, c in
+                    sorted(data["printers"].items(), key=lambda kv: kv[1], reverse=True)]
         st.markdown(_table(["Printer", "Total prints"], all_time), unsafe_allow_html=True)
 
         st.markdown("**By day**")

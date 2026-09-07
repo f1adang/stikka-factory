@@ -38,6 +38,7 @@ from image_utils import (
 )
 from printer_utils import (
     find_and_parse_printer,
+    display_name,
     print_image,
     # get_label_type
 )
@@ -288,7 +289,7 @@ def printer_summary(p, selected=False):
     label_color = "green" if p['label_type'] != 'unknown' else "red"
     status_color = "green" if p['status'] == 'Waiting to receive' else "red"
     return (
-        f":{'green' if selected else 'primary'}[**{p['name']}**]\n"
+        f":{'green' if selected else 'primary'}[**{display_name(p['name'])}**]\n"
         f"- Paper: :{media_color}[{media}]\n"
         f"- Label Size: :{label_color}[{p['label_size']}]\n"
         f"- Status:  :{status_color}[{p['status']}]"
@@ -299,11 +300,16 @@ st.sidebar.subheader(":primary[Printer Selection]")
 
 # The radio spells out the paper so it's visible at the moment of choosing,
 # not just further down the sidebar.
+# Options stay the full names - they're the identity the selection and the
+# [media] lookup match on - while format_func drops the serial for display.
 media_by_name = {p["name"]: p["media"] for p in printers}
 printer = st.sidebar.radio(
     "**Available Printer**",
     available_printers,
-    format_func=lambda name: f"{name} · {media_by_name[name]}" if media_by_name.get(name) else name,
+    format_func=lambda name: (
+        f"{display_name(name)} · {media_by_name[name]}" if media_by_name.get(name)
+        else display_name(name)
+    ),
 )
 selected_printer = next((p for p in printers if p["name"] == printer), None)
 
@@ -342,10 +348,10 @@ else:
     # Users pick a printer once and then work inside a tab, so keep the loaded
     # paper visible next to the thing they're about to print.
     if selected_printer['media']:
-        st.info(f"Printing on **{selected_printer['name']}** — **{selected_printer['media']}** paper")
+        st.info(f"Printing on **{display_name(selected_printer['name'])}** — **{selected_printer['media']}** paper")
     else:
         st.warning(
-            f"Printing on **{selected_printer['name']}** — paper not configured. "
+            f"Printing on **{display_name(selected_printer['name'])}** — paper not configured. "
             f"Add it under `[media]` in `config.toml`."
         )
 

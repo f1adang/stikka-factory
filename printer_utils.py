@@ -1,6 +1,7 @@
 """Printer handling and detection utilities for the Sticker Factory."""
 
 import logging
+import re
 import subprocess
 import tempfile
 import threading
@@ -47,6 +48,21 @@ DISCOVERY_LOCK_TIMEOUT = 2.0
 # Those models can't tell us when they are done, so this stands in for the
 # read-back we would otherwise wait on.
 STATUS_LESS_SETTLE_SECONDS = 1.5
+
+
+# Trailing " - <4 chars>" as appended by find_and_parse_printer(). Anchored and
+# fixed-width so a name without one (the virtual printer) is left alone.
+_SERIAL_SUFFIX = re.compile(r" - [A-Za-z0-9]{4}$")
+
+
+def display_name(name):
+    """Printer name as users should see it, without the serial suffix.
+
+    The stored name keeps the suffix: it is the identity that [media] keys,
+    stats records and the selection radio all match on, and two printers of
+    the same model would otherwise collide. Only the presentation drops it.
+    """
+    return _SERIAL_SUFFIX.sub("", str(name))
 
 
 def get_media_type(name, serial_number=""):
