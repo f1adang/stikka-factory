@@ -101,7 +101,7 @@ def list_saved_images(filter_duplicates=True):
 
 # Listed first by get_fonts(), which makes it the pre-selected font in the
 # label tab (it defaults to fonts[0]).
-DEFAULT_FONT = "fonts/Shadowed Germanica.ttf"
+DEFAULT_FONT = "fonts/UnifrakturCook-Bold.ttf"
 
 
 def get_fonts():
@@ -190,13 +190,13 @@ def _germanica_style(font_path, color):
     return f"""
     <style>
     @font-face {{
-        font-family: 'GermanicaSlogan';
+        font-family: 'StikkaFraktur';
         src: url(data:font/ttf;base64,{b64}) format('truetype');
         font-display: swap;
     }}
     .stikka-slogan {{
-        /* Emoji fall through to the system face; Germanica has no ❤ glyph. */
-        font-family: 'GermanicaSlogan', 'Apple Color Emoji', 'Segoe UI Emoji', serif;
+        /* Emoji fall through to the system face; the blackletter has no ❤ glyph. */
+        font-family: 'StikkaFraktur', 'Apple Color Emoji', 'Segoe UI Emoji', serif;
         /* Streamlit ships `.st-emotion-cache-<hash> p {{ font-size: inherit }}`,
            which outranks a bare class selector. The hash changes with every
            Streamlit release, so override it here rather than matching it. */
@@ -211,7 +211,7 @@ def _germanica_style(font_path, color):
        :rainbow[] gradient as a background-image clipped to the text, so it
        survives the font swap untouched - only the glyph shapes change. */
     [data-testid="stHeadingWithActionElements"] h1 {{
-        font-family: 'GermanicaSlogan', 'Apple Color Emoji', 'Segoe UI Emoji', serif !important;
+        font-family: 'StikkaFraktur', 'Apple Color Emoji', 'Segoe UI Emoji', serif !important;
         letter-spacing: 0.02em;
     }}
     </style>

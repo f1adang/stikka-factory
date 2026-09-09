@@ -127,6 +127,9 @@ fonts/*.otf
 # Germanica (Lloyd, dafont: 100% free, fsType 0) - shipped so the
 # printer hosts get it from a git pull rather than a manual copy.
 !fonts/*Germanica.ttf
+# UnifrakturCook (j. 'mach' wust / Peter Wiegel, SIL OFL 1.1, fsType 0).
+# Same reasoning; this is the face the app actually defaults to.
+!fonts/UnifrakturCook-Bold.ttf
 
 # debug dir
 debug/*

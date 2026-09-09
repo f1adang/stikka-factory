@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger("sticker_factory.tabs.name_tag")
 
-GERMANICA = "fonts/Shadowed Germanica.ttf"
+FRAKTUR = "fonts/UnifrakturCook-Bold.ttf"
 
 # Wording for each flavour. Edit here to change what the badge says - the
 # greeting is the only word on the tag that isn't the person's name.
@@ -22,8 +22,8 @@ FLAVOURS = {
     "Deutsch": {
         "greeting": "HEIL",
         "subtitle": "Mein Name ist",
-        # Pinned: this flavour is always set in Germanica.
-        "font": GERMANICA,
+        # Pinned: this flavour is always set in the blackletter face.
+        "font": FRAKTUR,
     },
 }
 
@@ -170,9 +170,10 @@ def render(printer_info, print_image, get_fonts):
 
     name_font = heading_font
 
-    # Germanica covers A-Z, a-z, 0-9 and basic punctuation only - no umlauts,
-    # no eszett. A badge that can't spell someone's name is not much of a
-    # badge, so say so and offer a face that can.
+    # UnifrakturCook covers the umlauts and eszett a German name tag needs, but
+    # the English flavour lets any font be picked and some of the bundled ones
+    # (Germanica, Tami) have no accented glyphs at all. A badge that can't spell
+    # someone's name is not much of a badge, so say so and offer a face that can.
     gaps = missing_glyphs(heading_font, name) if name else []
     if gaps:
         st.warning(
