@@ -387,6 +387,13 @@ else:
                         print_image=print_image,
                         img_concat_v=img_concat_v,
                     )
+                elif tab_name == "Name Tag":
+                    import tabs.name_tag as name_tag_module
+                    name_tag_module.render(
+                        printer_info=selected_printer,
+                        print_image=print_image,
+                        get_fonts=get_fonts,
+                    )
                 elif tab_name == "Text2image":
                     import tabs.text2image as text2image_module
                     # For text2image, we need to define submit function
