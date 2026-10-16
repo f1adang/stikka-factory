@@ -31,6 +31,12 @@ logger = logging.getLogger("sticker_factory.printer_utils")
 # (These are exactly the models brother_ql marks mode_setting=False.)
 MODELS_WITHOUT_STATUS = frozenset({"QL-500", "QL-550", "QL-560", "QL-570", "QL-700"})
 
+# Models brother_ql thinks support TIFF (PackBits) raster compression but which
+# don't. A compressed job makes the QL-650TD show "Transmission Error!" and stop
+# answering on USB until it is power-cycled; the same job uncompressed prints.
+# (brother_ql already disables compression for the models above.)
+MODELS_WITHOUT_COMPRESSION = frozenset({"QL-650TD"})
+
 # Serialises every USB conversation with a printer. Printing happens on the
 # job-queue worker thread while Streamlit reruns call find_and_parse_printer()
 # on the main thread; without this both can hold a libusb handle on the same
@@ -474,7 +480,7 @@ def process_print_job(image, printer_info, temp_file_path, rotate=0, dither=Fals
             rotate=rotate,
             threshold=70,
             dither=dither,
-            compress=True,
+            compress=printer_info["model"] not in MODELS_WITHOUT_COMPRESSION,
             red=False,
             dpi_600=False,
             hq=False,
