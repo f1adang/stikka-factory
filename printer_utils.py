@@ -2,7 +2,6 @@
 
 import logging
 import re
-import subprocess
 import tempfile
 import threading
 import time
@@ -48,6 +47,10 @@ DISCOVERY_LOCK_TIMEOUT = 2.0
 # Those models can't tell us when they are done, so this stands in for the
 # read-back we would otherwise wait on.
 STATUS_LESS_SETTLE_SECONDS = 1.5
+
+# How long to wait for the reply to a status request. Printers that answer do
+# so within a few milliseconds.
+STATUS_REPLY_TIMEOUT = 1.0
 
 
 # Trailing " - <4 chars>" as appended by find_and_parse_printer(). Anchored and
@@ -241,55 +244,67 @@ def get_printer_status(printer):
         logger.debug(f"Using fallback label type {printer['label_type']} for model {printer['model']}")
     else:
         try:
-            cmd = [
-                "brother_ql", "-b", "pyusb",
-                "--model", str(printer['model']),
-                "-p", str(printer['identifier']),
-                "status",
-            ]
-            logger.debug(f"Running status command: {' '.join(cmd)}")
-            # Held across the subprocess so we never open a second libusb
+            # Held for the whole exchange so we never open a second libusb
             # handle on a device the print worker is currently using.
             with _usb_lock:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            
-            # Log the raw output for debugging
-            if result.stdout:
-                logger.debug(f"Status command stdout:\n{result.stdout}")
-            if result.stderr:
-                logger.warning(f"Status command stderr:\n{result.stderr}")
-            if result.returncode != 0:
-                logger.warning(f"Status command returned non-zero exit code: {result.returncode}")
-                
-            for line in result.stdout.splitlines():
-                if "Phase:" in line:
-                    printer['status'] = line.split("Phase:")[1].strip()
-                    logger.debug(f"Detected status: {printer['status']}")
-                if "Media size:" in line:
-                    printer['label_size'] = line.split("Media size:")[1].strip()
-                    size_str = line.split("Media size:")[1].strip().split('x')[0].strip()
-                    try:
-                        media_width_mm = int(size_str)
-                        label_sizes = {
-                            12: "12", 29: "29", 38: "38", 50: "50", 54: "54",
-                            62: "62", 102: "102", 103: "103", 104: "104"
-                        }
-                        if media_width_mm in label_sizes:
-                            label_type = label_sizes[media_width_mm]
-                            printer['label_type'] = label_type
-                            printer['label_width'] = get_label_width(label_type)
-                            printer['label_height'] = None
-                            logger.debug(f"Detected label type: {label_type} from width: {media_width_mm}mm")
-                    except Exception as e:
-                        logger.warning(f"Exception parsing media width: {str(e)}")
+                result = _query_status(printer['identifier'], printer['model'])
+
+            printer['status'] = result['phase_type']
+            logger.debug(f"Detected status: {printer['status']}")
+            if result['errors']:
+                logger.warning(f"Printer {printer['name']} reports errors: {result['errors']}")
+            media_width_mm = result['media_width']
+            printer['label_size'] = f"{media_width_mm} x {result['media_length']} mm"
+            label_sizes = {
+                12: "12", 29: "29", 38: "38", 50: "50", 54: "54",
+                62: "62", 102: "102", 103: "103", 104: "104"
+            }
+            if media_width_mm in label_sizes:
+                label_type = label_sizes[media_width_mm]
+                printer['label_type'] = label_type
+                printer['label_width'] = get_label_width(label_type)
+                printer['label_height'] = None
+                logger.debug(f"Detected label type: {label_type} from width: {media_width_mm}mm")
             logger.info(f"Printer {printer['name']}: label type: {printer['label_type']}, status: {printer['status']}")
 
-        except subprocess.TimeoutExpired:
-            logger.error(f"Timeout getting status for printer {printer['name']} - USB might be busy")
-            printer['status'] = "timeout"
         except Exception as e:
             logger.warning(f"Error getting status for printer {printer['name']}: {str(e)}")
             printer['status'] = str(e)
+
+def _query_status(identifier, model):
+    """Ask a printer for its status and return brother_ql's parsed reply.
+
+    Some models (the QL-650TD at least) ignore a bare "ESC i S" and only answer
+    once they have been through the invalidate + initialize preamble that every
+    print job starts with, so we always send that first. It is harmless for
+    models that would have answered anyway.
+    """
+    qlr = BrotherQLRaster(model)
+    qlr.add_invalidate()
+    qlr.add_initialize()
+    qlr.add_status_information()
+
+    try:
+        brother = get_printer(identifier, "pyusb")
+    except SystemExit:
+        # See _send_instructions(): the backend sys.exit()s when it can't claim the device.
+        raise RuntimeError(f"Could not open printer {identifier} (busy or permission denied)")
+
+    try:
+        brother.write(qlr.data)
+        reply = b""
+        start = time.time()
+        while len(reply) < 32 and time.time() - start < STATUS_REPLY_TIMEOUT:
+            data = brother.read()
+            if data:
+                reply += data
+            else:
+                time.sleep(0.01)
+        if len(reply) < 32:
+            raise RuntimeError(f"No status reply (got {len(reply)} of 32 bytes)")
+        return interpret_response(reply[:32])
+    finally:
+        brother.dispose()
 
 def get_label_width(label_type):
     """Get the pixel width of a label type."""
@@ -307,8 +322,8 @@ def _send_instructions(instructions, printer_info):
     brother_ql's own send() never disposes the backend it opens - the handle
     only goes away whenever __del__ happens to run. In a long-lived Streamlit
     process that leaves the USB interface claimed after every print, so the
-    next libusb_open on the device (ours, or the `brother_ql status`
-    subprocess') fails or segfaults. Returns (success, message).
+    next libusb_open on the device (a later print, or a status query)
+    fails or segfaults. Returns (success, message).
     """
     identifier = printer_info["identifier"]
     model = printer_info["model"]
